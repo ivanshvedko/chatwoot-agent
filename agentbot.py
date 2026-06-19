@@ -540,17 +540,22 @@ async def handle_webhook(request: Request, background_tasks: BackgroundTasks):
 
     data = json.loads(body)
     event = data.get("event", "")
-    logger.debug(f"Webhook: event={event}")
+    logger.info(f"Webhook received: event={event}, keys={list(data.keys())}")
+    # Dump full payload for debugging
+    logger.info(f"Webhook payload: {json.dumps(data, default=str)[:500]}")
 
     # ── New message from customer ──
     if event == "message_created":
         message = data.get("message", {})
         conversation = data.get("conversation", {})
+        logger.info(f"message_created: msg_type={message.get('message_type')}, sender_type={message.get('sender', {}).get('type')}")
 
         if message.get("message_type") != "incoming":
+            logger.info(f"Ignored: message_type={message.get('message_type')} (not incoming)")
             return {"status": "ignored", "reason": "not incoming"}
         sender = message.get("sender", {})
         if sender.get("type") != "contact":
+            logger.info(f"Ignored: sender_type={sender.get('type')} (not contact)")
             return {"status": "ignored", "reason": "not from contact"}
 
         conversation_id = conversation.get("id")
