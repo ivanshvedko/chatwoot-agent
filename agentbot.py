@@ -153,6 +153,9 @@ LANG_NAMES = {
 
 def detect_language(text: str) -> str:
     """Detect language; returns ISO code, defaults to 'en'."""
+    # Cyrillic heuristic — langdetect struggles with short strings
+    if any('\u0400' <= c <= '\u04FF' for c in text):
+        return "ru"
     try:
         lang = detect(text)
         return lang if lang in LANG_NAMES else "en"
