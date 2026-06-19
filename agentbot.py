@@ -465,6 +465,7 @@ def process_message(conversation_id: int, content: str):
             "en": "Hello! I'm the virtual support assistant. Please describe your question or issue, and I'll do my best to help."
         }
         send_reply(conversation_id, replies.get(language, replies["en"]))
+        update_conversation_status(conversation_id, "open")
         return
 
     if is_thanks(content):
@@ -474,6 +475,7 @@ def process_message(conversation_id: int, content: str):
             "en": "You're welcome! Feel free to reach out if you need anything else."
         }
         send_reply(conversation_id, replies.get(language, replies["en"]))
+        update_conversation_status(conversation_id, "open")
         return
 
     # ── Cache check ──
@@ -482,6 +484,7 @@ def process_message(conversation_id: int, content: str):
     if cached:
         logger.info(f"Cache HIT: {content[:50]}...")
         send_reply(conversation_id, cached)
+        update_conversation_status(conversation_id, "open")
         return
 
     # ── Search ──
@@ -495,6 +498,7 @@ def process_message(conversation_id: int, content: str):
     if reply:
         llm_cache.set(cache_key, reply)
         send_reply(conversation_id, reply)
+        update_conversation_status(conversation_id, "open")
         logger.info(f"Reply sent conv={conversation_id}, lang={language}")
     else:
         # Both LLMs failed — escalate to human
