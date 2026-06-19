@@ -546,20 +546,21 @@ async def handle_webhook(request: Request, background_tasks: BackgroundTasks):
 
     # ── New message from customer ──
     if event == "message_created":
-        message = data.get("message", {})
+        # Chatwoot sends message_type and sender at top level, not nested
+        message_type = data.get("message_type", "")
+        sender = data.get("sender", {})
         conversation = data.get("conversation", {})
-        logger.info(f"message_created: msg_type={message.get('message_type')}, sender_type={message.get('sender', {}).get('type')}")
+        logger.info(f"message_created: msg_type={message_type}, sender_type={sender.get('type')}")
 
-        if message.get("message_type") != "incoming":
-            logger.info(f"Ignored: message_type={message.get('message_type')} (not incoming)")
+        if message_type != "incoming":
+            logger.info(f"Ignored: message_type={message_type} (not incoming)")
             return {"status": "ignored", "reason": "not incoming"}
-        sender = message.get("sender", {})
         if sender.get("type") != "contact":
             logger.info(f"Ignored: sender_type={sender.get('type')} (not contact)")
             return {"status": "ignored", "reason": "not from contact"}
 
         conversation_id = conversation.get("id")
-        content = (message.get("content") or "").strip()
+        content = (data.get("content") or "").strip()
 
         if not content or not conversation_id:
             return {"status": "ignored", "reason": "empty"}
