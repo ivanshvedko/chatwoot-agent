@@ -94,6 +94,10 @@ def init_db():
 
 init_db()
 
+# ── Handoff tracking ─────────────────────────────────────────────────────────
+# Conversations that have been handed off to a human — bot stays silent
+handed_off: set[int] = set()
+
 # ── LRU Cache ────────────────────────────────────────────────────────────────
 class LRUCache:
     """Thread-safe-ish LRU cache with TTL for LLM responses."""
@@ -502,6 +506,11 @@ def verify_webhook(payload: bytes, signature: str) -> bool:
 # ── Core: Message Processing ─────────────────────────────────────────────────
 def process_message(conversation_id: int, content: str):
     """Full pipeline: detect → search → LLM → reply."""
+    # Stay silent if conversation was handed off to a human
+    if conversation_id in handed_off:
+        logger.info(f"Silent: conv={conversation_id} handed off to human")
+        return
+
     logger.info(f"Processing conv={conversation_id}: «{content[:80]}...»")
 
     # ── Rate limit ──
@@ -541,6 +550,7 @@ def process_message(conversation_id: int, content: str):
         send_reply(conversation_id, replies.get(language, replies["en"]))
         update_conversation_status(conversation_id, "open")
         assign_to_available_agent(conversation_id)
+        handed_off.add(conversation_id)
         logger.info(f"Human handoff conv={conversation_id}")
         return
 
