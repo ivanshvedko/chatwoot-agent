@@ -420,47 +420,35 @@ def update_conversation_status(conversation_id: int, status: str) -> bool:
         return False
 
 def assign_to_available_agent(conversation_id: int) -> bool:
-    """Find first available agent in the conversation's inbox and assign."""
-    # 1. Get conversation details to find inbox_id
-    conv_url = f"{CHATWOOT_URL}/api/v1/accounts/{CHATWOOT_ACCOUNT_ID}/conversations/{conversation_id}"
-    try:
-        resp = requests.get(conv_url, headers=_api_headers(), timeout=10)
-        if resp.status_code != 200:
-            logger.error(f"Get conversation failed: {resp.status_code}")
-            return False
-        inbox_id = resp.json().get("inbox_id")
-        if not inbox_id:
-            return False
-    except Exception as e:
-        logger.error(f"Get conversation exception: {e}")
-        return False
-
-    # 2. Get agents in the inbox
-    agents_url = f"{CHATWOOT_URL}/api/v1/accounts/{CHATWOOT_ACCOUNT_ID}/inboxes/{inbox_id}/agents"
+    """Find first available (online) agent in the account and assign."""
+    # 1. Get all agents in the account
+    agents_url = f"{CHATWOOT_URL}/api/v1/accounts/{CHATWOOT_ACCOUNT_ID}/agents"
     try:
         resp = requests.get(agents_url, headers=_api_headers(), timeout=10)
         if resp.status_code != 200:
             logger.error(f"Get agents failed: {resp.status_code}")
             return False
-        agents = resp.json().get("payload", [])
+        agents = resp.json()
+        if isinstance(agents, dict):
+            agents = agents.get("payload", [])
     except Exception as e:
         logger.error(f"Get agents exception: {e}")
         return False
 
     if not agents:
-        logger.warning(f"No agents in inbox {inbox_id}")
+        logger.warning("No agents in account")
         return False
 
-    # 3. Pick first available (online) agent
+    # 2. Pick first online agent, fallback to first agent
     agent_id = None
     for agent in agents:
         if agent.get("availability_status") == "online":
             agent_id = agent["id"]
             break
     if agent_id is None:
-        agent_id = agents[0]["id"]  # fallback: first agent regardless
+        agent_id = agents[0]["id"]
 
-    # 4. Assign
+    # 3. Assign conversation to agent
     assign_url = f"{CHATWOOT_URL}/api/v1/accounts/{CHATWOOT_ACCOUNT_ID}/conversations/{conversation_id}/assignments"
     try:
         resp = requests.post(assign_url, headers=_api_headers(), json={"assignee_id": agent_id}, timeout=10)
