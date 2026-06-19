@@ -555,9 +555,10 @@ async def handle_webhook(request: Request, background_tasks: BackgroundTasks):
         if message_type != "incoming":
             logger.info(f"Ignored: message_type={message_type} (not incoming)")
             return {"status": "ignored", "reason": "not incoming"}
-        if sender.get("type") != "contact":
-            logger.info(f"Ignored: sender_type={sender.get('type')} (not contact)")
-            return {"status": "ignored", "reason": "not from contact"}
+        # Skip messages from the bot itself (prevent loops)
+        if sender.get("name") == "AI Assistant" or data.get("private"):
+            logger.info(f"Ignored: from bot or private")
+            return {"status": "ignored", "reason": "from bot"}
 
         conversation_id = conversation.get("id")
         content = (data.get("content") or "").strip()
