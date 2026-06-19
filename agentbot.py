@@ -179,6 +179,18 @@ def is_greeting(text: str) -> bool:
 def is_thanks(text: str) -> bool:
     return bool(THANKS_PATTERNS.match(text.strip()))
 
+# ── Human Handoff Detection ──────────────────────────────────────────────────
+HUMAN_REQUEST_PATTERNS = re.compile(
+    r"(человек[ау]?|оператор[ау]?|жив[оы]й|живого|настоящ|human|person|agent|real person"
+    r"|live agent|talk to|speak to|connect me|transfer|переключи|переведи|позови"
+    r"|соедини|conecta|transfiere|hablar con|persona real|agente humano)",
+    re.IGNORECASE
+)
+
+def is_human_request(text: str, language: str) -> bool:
+    """Detect if user is explicitly asking for a human agent."""
+    return bool(HUMAN_REQUEST_PATTERNS.search(text.strip()))
+
 # ── Wiki Search ──────────────────────────────────────────────────────────────
 def search_wiki(query: str, top_k: int = None) -> list[dict]:
     """Search wiki .md files by keyword relevance."""
@@ -407,6 +419,61 @@ def update_conversation_status(conversation_id: int, status: str) -> bool:
         logger.error(f"Status update exception: {e}")
         return False
 
+def assign_to_available_agent(conversation_id: int) -> bool:
+    """Find first available agent in the conversation's inbox and assign."""
+    # 1. Get conversation details to find inbox_id
+    conv_url = f"{CHATWOOT_URL}/api/v1/accounts/{CHATWOOT_ACCOUNT_ID}/conversations/{conversation_id}"
+    try:
+        resp = requests.get(conv_url, headers=_api_headers(), timeout=10)
+        if resp.status_code != 200:
+            logger.error(f"Get conversation failed: {resp.status_code}")
+            return False
+        inbox_id = resp.json().get("inbox_id")
+        if not inbox_id:
+            return False
+    except Exception as e:
+        logger.error(f"Get conversation exception: {e}")
+        return False
+
+    # 2. Get agents in the inbox
+    agents_url = f"{CHATWOOT_URL}/api/v1/accounts/{CHATWOOT_ACCOUNT_ID}/inboxes/{inbox_id}/agents"
+    try:
+        resp = requests.get(agents_url, headers=_api_headers(), timeout=10)
+        if resp.status_code != 200:
+            logger.error(f"Get agents failed: {resp.status_code}")
+            return False
+        agents = resp.json().get("payload", [])
+    except Exception as e:
+        logger.error(f"Get agents exception: {e}")
+        return False
+
+    if not agents:
+        logger.warning(f"No agents in inbox {inbox_id}")
+        return False
+
+    # 3. Pick first available (online) agent
+    agent_id = None
+    for agent in agents:
+        if agent.get("availability_status") == "online":
+            agent_id = agent["id"]
+            break
+    if agent_id is None:
+        agent_id = agents[0]["id"]  # fallback: first agent regardless
+
+    # 4. Assign
+    assign_url = f"{CHATWOOT_URL}/api/v1/accounts/{CHATWOOT_ACCOUNT_ID}/conversations/{conversation_id}/assignments"
+    try:
+        resp = requests.post(assign_url, headers=_api_headers(), json={"assignee_id": agent_id}, timeout=10)
+        if resp.status_code == 200:
+            logger.info(f"Assigned conv={conversation_id} to agent={agent_id}")
+            return True
+        else:
+            logger.error(f"Assign failed {resp.status_code}: {resp.text[:200]}")
+            return False
+    except Exception as e:
+        logger.error(f"Assign exception: {e}")
+        return False
+
 def get_conversation_messages(conversation_id: int) -> list[dict]:
     """Fetch all messages from a conversation."""
     url = f"{CHATWOOT_URL}/api/v1/accounts/{CHATWOOT_ACCOUNT_ID}/conversations/{conversation_id}/messages"
@@ -465,7 +532,6 @@ def process_message(conversation_id: int, content: str):
             "en": "Hello! I'm the virtual support assistant. Please describe your question or issue, and I'll do my best to help."
         }
         send_reply(conversation_id, replies.get(language, replies["en"]))
-        update_conversation_status(conversation_id, "open")
         return
 
     if is_thanks(content):
@@ -475,7 +541,19 @@ def process_message(conversation_id: int, content: str):
             "en": "You're welcome! Feel free to reach out if you need anything else."
         }
         send_reply(conversation_id, replies.get(language, replies["en"]))
+        return
+
+    # ── Human handoff detection ──
+    if is_human_request(content, language):
+        replies = {
+            "ru": "Сейчас переключу на человека-оператора. Пожалуйста, подождите немного.",
+            "es": "Voy a transferir su consulta a un agente humano. Por favor, espere un momento.",
+            "en": "I'm transferring you to a human agent. Please hold on a moment."
+        }
+        send_reply(conversation_id, replies.get(language, replies["en"]))
         update_conversation_status(conversation_id, "open")
+        assign_to_available_agent(conversation_id)
+        logger.info(f"Human handoff conv={conversation_id}")
         return
 
     # ── Cache check ──
@@ -484,7 +562,6 @@ def process_message(conversation_id: int, content: str):
     if cached:
         logger.info(f"Cache HIT: {content[:50]}...")
         send_reply(conversation_id, cached)
-        update_conversation_status(conversation_id, "open")
         return
 
     # ── Search ──
@@ -498,7 +575,6 @@ def process_message(conversation_id: int, content: str):
     if reply:
         llm_cache.set(cache_key, reply)
         send_reply(conversation_id, reply)
-        update_conversation_status(conversation_id, "open")
         logger.info(f"Reply sent conv={conversation_id}, lang={language}")
     else:
         # Both LLMs failed — escalate to human
