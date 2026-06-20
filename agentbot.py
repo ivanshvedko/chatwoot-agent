@@ -621,9 +621,6 @@ async def handle_webhook(request: Request, background_tasks: BackgroundTasks):
 
     data = json.loads(body)
     event = data.get("event", "")
-    logger.info(f"Webhook received: event={event}, keys={list(data.keys())}")
-    # Dump full payload for debugging
-    logger.info(f"Webhook payload: {json.dumps(data, default=str)[:500]}")
 
     # ── New message from customer ──
     if event == "message_created":
@@ -631,14 +628,11 @@ async def handle_webhook(request: Request, background_tasks: BackgroundTasks):
         message_type = data.get("message_type", "")
         sender = data.get("sender", {})
         conversation = data.get("conversation", {})
-        logger.info(f"message_created: msg_type={message_type}, sender_type={sender.get('type')}")
 
         if message_type != "incoming":
-            logger.info(f"Ignored: message_type={message_type} (not incoming)")
             return {"status": "ignored", "reason": "not incoming"}
         # Skip messages from the bot itself (prevent loops)
         if sender.get("name") == "AI Assistant" or data.get("private"):
-            logger.info(f"Ignored: from bot or private")
             return {"status": "ignored", "reason": "from bot"}
 
         conversation_id = conversation.get("id")
